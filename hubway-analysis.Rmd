@@ -1,0 +1,377 @@
+---
+title: "Data Analysis of Hubway bike trips"
+author: "Elena Ines Saez Papachristou"
+editor_options:
+  chunk_output_type: inline
+---
+
+
+
+* * *
+
+
+Bike sharing programs stand as pillars in the sharing economy, mirroring the efficiency and benefits seen in other sharing initiatives like car-sharing programs. By offering convenient access to bicycles without the burden of ownership or maintenance expenses, bike shares contribute to both economic and environmental well-being. They encourage more people to cycle, reducing reliance on cars, and preventing an excess of unused bicycles from being produced.
+
+Hubway is Boston’s most successful bike sharing program. The company asks customers to pay a relatively modest annual or monthly fee, and in return gives customers access to bicycles parked at stations across Boston, Brookline, Cambridge, and Somerville. Additionally, 24-hour and 72-hour passes are available for purchase by non-members. Customers can take short rides for free and pay a nominal hourly rate for any journey lasting more than 30 minutes. Typically, riders will pick up a bike from a “dock” in one part of the city and drop it off at another dock.
+
+By 2016, Hubway operated 185 stations and 1750 bicycles, with 5 million rides since launching in 2011.
+
+In April 2017, Hubway held a Data Visualization Challenge at the Microsoft NERD Center in Cambridge, releasing trip data.
+
+I will analyse data from Hubway trips.
+
+
+
+Reading the data files `hubway_stations.csv` and `hubway_trips.csv` into separate dataframes.
+
+```{r, results=FALSE, message=FALSE}
+library(dplyr)
+library(ggplot2)
+```
+
+
+```{r}
+
+stations <- read.csv("hubway_stations.csv")
+
+trips <- read.csv("hubway_trips.csv")
+
+```
+
+
+Taking a closer look at all the columns and understanding their types.
+
+
+```{r}
+
+str(stations)
+```
+```{r}
+str(trips)
+```
+
+
+Getting some statistical information from the stations and trips data
+
+
+```{r}
+
+summary(stations)
+```
+```{r}
+summary(trips)
+```
+
+
+Removing all the rows with null values in any one (or more) of the columns and creating a new dataframe with the name `trips_clean` and `stations_clean`. 
+
+```{r}
+
+trips_clean <- filter(trips, rowSums(is.na(trips)) == 0)
+
+stations_clean <- filter(stations, rowSums(is.na(stations)) == 0)
+```
+
+
+
+With the following code I firstly create a new variable `year` that shows the year that the trip occurred and then I compute the `hour` of the day. Then I find which year we have data from.
+
+```{r}
+
+# Converting the date column to Date class
+trips_clean$date <- as.Date(trips_clean$start_date)
+
+# Extracting only the year from the date column 
+trips_clean$year <- as.integer(format(trips_clean$date, "%Y"))
+
+# Extracting the hour from the date column
+trips_clean$hour <- substr(trips_clean$start_date, 12, 13)
+```
+
+
+```{r}
+
+unique(trips_clean$year)
+```
+We have data from the years 2011 and 2012.
+
+
+
+Creating a new dataframe that includes only data from 2012 with the name `trips_2012`. 
+
+
+```{r}
+
+trips_2012 <- filter(trips_clean, year == 2012)
+```
+
+Creating a new variable `age` in the `trips_2012` dataframe that gives the age of the rider (at the time of the trip).
+
+```{r}
+
+trips_2012$age <- trips_2012$year - trips_2012$birth_date
+```
+
+Removing the `birth_date` column from `trips_2012`. 
+
+```{r}
+
+trips_2012 <- select(trips_2012, -birth_date)
+```
+
+Let's perform relevant EDA to answer the following question:
+
+
+ - Who? Who's using the bikes? More men or more women? Older or younger people?
+ - When is the biggest rush hour?
+
+I will create relevant plots and compute summary statistics to answer the questions above using the `ggplot2` library.
+
+
+```{r}
+
+ggplot(trips_2012, aes(x = age)) + geom_histogram(bins = 20)
+```
+
+```{r}
+summary(trips_2012)
+```
+
+
+Based on the histogram above we conclude that the age group that uses bikes the most is around 20 - 35 years old, with a peak at the late 20s - 30. After the ages of 35-40, bike usage starts droping, so we can say that younger people use the bikes more than older people, with an exception to kids and teenagers, who don't use the bikes. We can also reinforce these facts seeing the statistical summary. The min age is 17, the max 78, and the median is 32, which means half the people who use bikes are in the ages 17-32, which is a span of 15 years, compared to the other half (32-78) which is a span of 46 years.
+
+```{r}
+
+ggplot(trips_2012, aes(x = gender)) + geom_bar()
+```
+
+
+Based on the barplot above that shows the number of bike rides by gender in 2012, we conclude that men used the bikes significantly more (the rides by women are approximately 1/3 of the ones by men).
+
+```{r, message=FALSE, warning=FALSE}
+ggplot(trips_2012, aes(x = hour)) + geom_histogram(stat = "count")
+```
+
+
+The biggest rush hour is at 17:00 in the afternoon and the second biggest at 08:00 in the morning. 
+
+
+Creating plots to find out if there is any relation between the stations data. 
+
+
+```{r}
+ggplot(stations_clean, aes(x = lat, y = lng)) + geom_point()
+```
+At first look the relationship between the latitude and the longitude seems to be random.
+
+```{r}
+summarize(stations_clean, correlation = cor(lat, lng))
+```
+
+But the correlation is -0.27 so there is a kind of linear correlation, even if not strong.
+Now we use linear regression to get more precise information:
+
+```{r}
+ggplot(stations_clean, aes(x = lat, y = lng)) +
+  geom_point() +
+  labs(x = "latitude", y = "longitude",
+       title = "Relationship between latitude and longitude") +  
+  geom_smooth(method = "lm", se = FALSE)
+```
+```{r}
+model_lat_lng <- lm(lng ~ lat, data = stations_clean)
+
+summary(model_lat_lng)
+```
+We have a negative slope, which coincides with the negative correlation, and the R-squared value is small, only 7.4% which means the correlation is not strong.
+
+
+Based on all the above, the relationship between the latitude and the longitude seems to be inversely proportionate (when the latitude increases, the longitude decreases), but the data suggests that the correlation is not really strong, so it is probably safer to assume that the relationship between those two is mostly random.
+
+
+How does user demographics impact the duration the bikes are being used? I will create two simple linear models and interpret the coefficients to answer the question above.
+
+
+```{r}
+trips_2012 %>% 
+  group_by(age) %>% 
+  summarize(avg_duration = mean(duration)) %>% 
+  ggplot(aes(x = age, y = avg_duration)) + geom_point() + labs(x = "age", y = "average duration (min)", title = "Relationship between users' age and bike trip duration") +  
+  geom_smooth(method = "lm", se = FALSE)
+
+```
+
+We are going to do the graph again without the outliers, by filtering the average duration.
+
+```{r}
+
+trips_2012 %>% 
+  group_by(age) %>% 
+  summarize(avg_duration = mean(duration)) %>% 
+  filter(avg_duration < 1250) %>% 
+  ggplot(aes(x = age, y = avg_duration)) + geom_point() + labs(x = "age", y = "average duration (min)", title = "Relationship between users' age and bike trip duration") +  
+  geom_smooth(method = "lm", se = FALSE)
+
+
+```
+
+
+Now the linear regression model:
+
+```{r}
+trips_2012_by_age <- group_by(trips_2012, age) 
+data <- summarize(trips_2012_by_age, avg_duration = mean(duration))
+filter(data, avg_duration < 1250)
+model_dur <- lm(avg_duration ~ age, data = data)
+summary(model_dur)
+
+```
+
+We can see that as the age increases, the average duration of the bike trip is longer. According to the linear regression model we have an intercept of value 302.958, and a slope of value 12.668.
+So our prediction line is: y = 12.668*x + 302.958
+
+This means that if the age of the user increases by 1 year, the average trip duration increases by 12.668 minutes. 
+
+But if we look at the first graph, it seems like before the age of 60, where according to the histogram that we made earlier, the majority of our users are, the duration seems to be in a straight line. So for the integrity of our results, we are fitting the line again till the age of 60, and then again only for the ages above 60.
+
+```{r}
+trips_2012 %>% 
+  group_by(age) %>% 
+  summarize(avg_duration = mean(duration)) %>% 
+  filter(avg_duration < 1250, age < 60) %>% 
+  ggplot(aes(x = age, y = avg_duration)) + geom_point() + labs(x = "age", y = "average duration (min)", title = "Relationship between users' age and bike trip duration") +  
+  geom_smooth(method = "lm", se = FALSE)
+
+```
+
+
+We can see now that the line is almost straight, which means that all the users till the age of 60 use the bikes for approximately the same duration.
+
+```{r}
+trips_2012 %>% 
+  group_by(age) %>% 
+  summarize(avg_duration = mean(duration)) %>% 
+  filter(avg_duration < 1250, age > 60) %>% 
+  ggplot(aes(x = age, y = avg_duration)) + geom_point() + labs(x = "age", y = "average duration (min)", title = "Relationship between users' age and bike trip duration") +  
+  geom_smooth(method = "lm", se = FALSE)
+```
+
+
+For the ages above 60, we can see now that the line is almost straight again but with a slightly increasing slope. 
+
+Based on these results, we can say that people over 60, even though less, use the bikes for a longer duration than people under 60. People under 60, use the bikes for approximately the same average duration.
+
+Now for the gender:
+
+```{r, message=FALSE, warning=FALSE}
+ggplot(trips_2012, aes(x = gender, y = duration)) + geom_boxplot() + 
+  labs(x = "gender", y = "duration (min)", title = "bike trip 
+  duration by gender") + ylim(c(0, 2000))
+```
+
+
+```{r}
+model_gender <- lm(duration ~ gender, data = trips_2012)
+summary(model_gender)
+```
+The intercept corresponds to the mean bike trip duration of women, and is 854.73 minutes.
+
+The value -139.81 is the difference in the mean trip duration of men relative to women. So the mean bike trip duration of men is 854.73 - 139.81 = 714.92 minutes.
+
+We conclude that in average women use the bikes for longer duration trips than men. 
+
+
+There are some questions that cannot be answered with simple graphing techniques. It requires combining different variables. Let us try to answer the question: How does the distance from the center of the city affect the bike usage?
+
+
+The following code, firstly counts the number of checkout from each station. Then it combines the data from the trips and the stations to calculate the distance of each checkout station from the city center using the `haversine()` function.
+It returns a dataframe `counts` that contains columns for station ID, number of checkouts, latitude, longitude, and distance to the city center.
+
+
+```{r}
+
+haversine <- function(pt, lat2=42.355589, lon2=-71.060175) {
+  # Calculating the great circle distance between two points on the earth 
+  
+  # Extracting latitude and longitude of point pt
+  lon1 <- pt[1]
+  lat1 <- pt[2]
+  
+  # Converting decimal degrees to radians
+  lon1 <- lon1 * pi / 180
+  lat1 <- lat1 * pi / 180
+  lon2 <- lon2 * pi / 180
+  lat2 <- lat2 * pi / 180
+  
+  # Haversine formula
+  dlon <- lon2 - lon1
+  dlat <- lat2 - lat1
+  a <- sin(dlat/2)^2 + cos(lat1) * cos(lat2) * sin(dlon/2)^2
+  c <- 2 * asin(sqrt(a))
+  r <- 3956 # Radius of earth in miles
+  
+  return(c * r)
+}
+
+get_distance <- function(trip_data, station_data){
+    station_counts <- table(subset(trip_data, !is.na(strt_statn))$strt_statn)
+    
+    # Converting the result to a dataframe
+  counts_df <- data.frame(
+      id = as.numeric(names(station_counts)),
+      checkouts = as.numeric(station_counts)
+    )
+    
+    # Joining with station data
+  counts_df <- merge(counts_df, station_data, by = "id")
+    
+  dist_to_center <- numeric()
+  for (i in 1:nrow(counts_df)){
+    dist_to_center <- rbind(dist_to_center, haversine(c(counts_df$lng[i], counts_df$lat[i])))}
+    
+  counts_df$dist_to_center <- dist_to_center
+    
+  return(counts_df)}
+
+counts <- get_distance(trips_2012, stations_clean)
+head(counts)
+```
+
+
+
+I will create a simple linear model to predict the number of checkouts based on the distance of the bikes from the centre of the city using the `counts` dataframe. Then, I will visualize the prediction against the data.
+
+
+```{r}
+
+model_checkouts <- lm(checkouts ~ dist_to_center, data = counts)
+summary(model_checkouts)
+ 
+```
+
+```{r}
+
+ggplot(counts, aes(x = dist_to_center, y = checkouts)) + geom_point() + labs(x = "distance from center (miles)", y = "number of checkouts", title = "Number of checkouts based on the distance of the station from the city center") +  
+  geom_smooth(method = "lm", se = FALSE)
+```
+
+
+Based on the linear model, the number of checkouts decreases as we move further from the center. Our prediction line is:
+
+y = -1510.6*x + 5666.9, where y is the number of checkouts and x is the distance from the center in miles.
+
+
+Based on our linear model, what would most likely be the number of checkouts for a distance of 2.5 miles from the city center?
+
+
+Our prediction model is the line: y = -1510.6 * x + 5666.9, where y are the checkouts and x the distance, so for x = 2.5 miles, y is:
+```{r}
+
+-1510.6 * 2.5 + 5666.9
+
+```
+The right answer is 3, 1890 checkouts.
+
+
+
+
